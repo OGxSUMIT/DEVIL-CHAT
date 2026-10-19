@@ -1,6 +1,6 @@
 --[[
 ============================================================
-  😈 DEVIL CHAT 😈🔥  V3.0
+  😈 DEVIL CHAT 😈🔥  V3.1
   ────────────────────────────────────────────
   OWNER   - DEVIL 😈⚡        (3886703288)
   AUTHOR  - OGxSUMIT ⚡       (7885039034)
@@ -11,7 +11,7 @@
 ============================================================
 ]]
 
-print("[DEVIL] V3.0 booting…")
+print("[DEVIL] V3.1 booting…")
 
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
@@ -1563,119 +1563,185 @@ local function buildUI()
         return toast
     end
 
-    -- MESSAGE TOAST THEME ("neon glass"): edit colors here
-    local MSG_TOAST_THEME={
-        BG=Color3.fromRGB(16,18,28), BG_ALPHA=0.06,
-        USER_A=Color3.fromRGB(0,229,255), USER_B=Color3.fromRGB(168,85,247),
-        SYS_A=Color3.fromRGB(255,190,60), SYS_B=Color3.fromRGB(255,110,70),
-        TEXT=Color3.fromRGB(240,244,255), TEXT_DIM=Color3.fromRGB(150,160,185),
-    }
+    -- ==================================================================
+    -- MESSAGE TOASTS V3.1 ("hellfire stack")
+    --  * stacks up to MT.max cards at once (newest on top) instead of one at a time
+    --  * role-coloured (owner red, author gold, ...), 🔒 private / ↩ reply / 📷 meme badges
+    --  * same sender spamming? the card updates in place with a ×N counter
+    --  * tap a card to dismiss it and open the chat if it is closed
+    --  Edit H.MT below to move or tune it.
+    -- ==================================================================
+    H.MT={ max=3, life=4.5, width=300, height=60, x=12, y=56, onlyWhenClosed=false, live={}, seq=0 }
+    do
+        local MT=H.MT
+        local holder=Instance.new("Frame")
+        holder.Name="MessageToastStack"
+        holder.Size=UDim2.new(0,MT.width,0,(MT.height+6)*MT.max+6)
+        holder.Position=UDim2.new(0,MT.x,0,MT.y)
+        holder.BackgroundTransparency=1 holder.ZIndex=60 holder.Parent=sg
+        local lay=Instance.new("UIListLayout")
+        lay.SortOrder=Enum.SortOrder.LayoutOrder lay.Padding=UDim.new(0,6) lay.Parent=holder
+        MT.holder=holder
+    end
 
-    function H.showToast(sender, displayName, msg, imageUrl, isSystem)
-        H.enqueueToast(function()
-            local T=MSG_TOAST_THEME
-            local colA=isSystem and T.SYS_A or T.USER_A
-            local colB=isSystem and T.SYS_B or T.USER_B
-            local W,HT=320,64
+    function H.dismissMsgToast(entry)
+        if not entry or entry.leaving then return end
+        entry.leaving=true
+        local live=H.MT.live
+        for i,e in ipairs(live) do if e==entry then table.remove(live,i) break end end
+        if entry.card and entry.card.Parent then
+            H.tween(entry.card, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position=UDim2.new(-1.15,0,0,0)})
+        end
+        task.delay(0.3, function() if entry.wrap and entry.wrap.Parent then entry.wrap:Destroy() end end)
+    end
 
-            local toast=Instance.new("Frame")
-            toast.Size=UDim2.new(0,W,0,HT) toast.AnchorPoint=POPUP_ANCHOR
-            toast.Position=UDim2.new(0.5,-math.floor(W/2),0,POPUP_POSITION.Y.Offset)
-            toast.BackgroundColor3=T.BG toast.BackgroundTransparency=T.BG_ALPHA toast.BorderSizePixel=0
-            toast.ClipsDescendants=true toast.ZIndex=20 toast.Parent=sg
-            do local tc=Instance.new("UICorner") tc.CornerRadius=UDim.new(0,18) tc.Parent=toast end
+    function H.showToast(sender, displayName, msg, imageUrl, isSystem, opts)
+        if not alive then return end
+        opts=opts or {}
+        local MT=H.MT
+        if MT.onlyWhenClosed and frame.Visible then return end
+        local role=resolveRole(opts.role, opts.userId)
+        local isPrivate=opts.private==true
+        local text=sanitizeUtf8(msg or "")
+        if opts.sticker then text="📷 sent a meme" end
+        if isPrivate then text="🔒 "..text end
+        text=utf8TruncateEnd(text, 70)
+        local key=isSystem and "__system" or tostring(opts.userId or sender or displayName)
 
-            -- soft tinted background wash
-            do
-                local bg=Instance.new("UIGradient")
-                bg.Color=ColorSequence.new({
-                    ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),
-                    ColorSequenceKeypoint.new(1,Color3.fromRGB(170,175,205)),
-                })
-                bg.Rotation=20 bg.Parent=toast
+        -- same sender still on screen -> update that card (spam control)
+        for _,e in ipairs(MT.live) do
+            if e.key==key and not e.leaving then
+                e.count=e.count+1
+                e.body.Text=text
+                e.badge.Text="×"..tostring(e.count) e.badge.Visible=true
+                e.scale.Scale=1.05
+                H.tween(e.scale, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale=1})
+                e.arm()
+                return
             end
+        end
 
-            -- hairline gradient border (slow rotate)
-            local st=Instance.new("UIStroke") st.Thickness=1.5 st.Color=Color3.fromRGB(255,255,255) st.Parent=toast
-            local sg2=Instance.new("UIGradient")
-            sg2.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,colA),ColorSequenceKeypoint.new(0.5,colB),ColorSequenceKeypoint.new(1,colA)})
-            sg2.Parent=st
-            task.spawn(function()
-                while toast.Parent do
-                    sg2.Rotation=(sg2.Rotation+3)%360
-                    task.wait(0.03)
-                end
-            end)
+        MT.seq=MT.seq+1
+        while #MT.live>=MT.max do H.dismissMsgToast(MT.live[1]) end
 
-            -- avatar: rounded square with accent frame
-            local frameAv=Instance.new("Frame")
-            frameAv.Size=UDim2.new(0,42,0,42) frameAv.Position=UDim2.new(0,12,0.5,-21)
-            frameAv.BackgroundColor3=Color3.fromRGB(30,33,48) frameAv.BorderSizePixel=0
-            frameAv.ZIndex=22 frameAv.Parent=toast
-            do local fc=Instance.new("UICorner") fc.CornerRadius=UDim.new(0,13) fc.Parent=frameAv end
-            do
-                local fs=Instance.new("UIStroke") fs.Thickness=1.5 fs.Color=Color3.fromRGB(255,255,255) fs.Parent=frameAv
-                local fg=Instance.new("UIGradient")
-                fg.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,colA),ColorSequenceKeypoint.new(1,colB)})
-                fg.Rotation=45 fg.Parent=fs
+        local colA, colB
+        if isSystem then colA, colB = PAL.ACCENT_2, PAL.ACCENT
+        else
+            colA = (role~="none") and getOnlineColor(role, opts.userId) or PAL.ACCENT
+            colB = PAL.ACCENT_2
+            if isPrivate then colA=Color3.fromRGB(255,80,200) end
+        end
+
+        local wrap=Instance.new("Frame")
+        wrap.Name="MsgToast" wrap.Size=UDim2.new(1,0,0,MT.height)
+        wrap.BackgroundTransparency=1 wrap.LayoutOrder=-MT.seq wrap.ZIndex=60 wrap.Parent=MT.holder
+
+        local card=Instance.new("Frame")
+        card.Name="Card" card.Size=UDim2.new(1,0,1,0) card.Position=UDim2.new(-1.15,0,0,0)
+        card.BackgroundColor3=PAL.PANEL card.BackgroundTransparency=0.04 card.BorderSizePixel=0
+        card.ClipsDescendants=true card.ZIndex=61 card.Parent=wrap
+        do local cc=Instance.new("UICorner") cc.CornerRadius=UDim.new(0,12) cc.Parent=card end
+        local scale=Instance.new("UIScale") scale.Parent=card
+        local st=Instance.new("UIStroke") st.Thickness=1.5 st.Color=Color3.fromRGB(255,255,255) st.Parent=card
+        local sgr=Instance.new("UIGradient")
+        sgr.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,colA),ColorSequenceKeypoint.new(0.5,colB),ColorSequenceKeypoint.new(1,colA)})
+        sgr.Parent=st
+        task.spawn(function()
+            while card.Parent do
+                sgr.Rotation=(sgr.Rotation+4)%360
+                task.wait(0.04)
             end
-            local sc=Instance.new("UIScale") sc.Scale=0.6 sc.Parent=frameAv
-            H.tween(sc, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale=1})
-
-            if not isSystem then
-                local av=Instance.new("ImageLabel")
-                av.Size=UDim2.new(1,-4,1,-4) av.Position=UDim2.new(0,2,0,2)
-                av.BackgroundTransparency=1 av.Image=imageUrl or "" av.ZIndex=23 av.Parent=frameAv
-                do local ac=Instance.new("UICorner") ac.CornerRadius=UDim.new(0,11) ac.Parent=av end
-                H.loadAvatarInto(av, nil, sender)
-            else
-                local ic=Instance.new("TextLabel")
-                ic.Size=UDim2.new(1,0,1,0) ic.BackgroundTransparency=1 ic.Text="🔔" ic.TextSize=20
-                ic.ZIndex=23 ic.Parent=frameAv
-                H.tween(ic, TweenInfo.new(0.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Rotation=14})
-            end
-
-            -- name
-            local nameLabel=Instance.new("TextLabel")
-            nameLabel.Size=UDim2.new(1,-120,0,16) nameLabel.Position=UDim2.new(0,64,0,11)
-            nameLabel.BackgroundTransparency=1
-            nameLabel.Text=isSystem and "SYSTEM" or tostring(displayName)
-            nameLabel.TextColor3=T.TEXT nameLabel.TextSize=13 nameLabel.Font=Enum.Font.GothamBold
-            nameLabel.TextXAlignment=Enum.TextXAlignment.Left nameLabel.TextTruncate=Enum.TextTruncate.AtEnd
-            nameLabel.ZIndex=23 nameLabel.Parent=toast
-
-            -- "now" pill
-            local pill=Instance.new("TextLabel")
-            pill.Size=UDim2.new(0,38,0,16) pill.Position=UDim2.new(1,-50,0,11)
-            pill.BackgroundColor3=colA pill.BackgroundTransparency=0.82 pill.BorderSizePixel=0
-            pill.Text="NOW" pill.TextColor3=colA pill.TextSize=9 pill.Font=Enum.Font.GothamBlack
-            pill.ZIndex=23 pill.Parent=toast
-            do local pc=Instance.new("UICorner") pc.CornerRadius=UDim.new(1,0) pc.Parent=pill end
-            H.tween(pill, TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {BackgroundTransparency=0.6})
-
-            -- message body
-            local body=Instance.new("TextLabel")
-            body.Size=UDim2.new(1,-78,0,18) body.Position=UDim2.new(0,64,0,31)
-            body.BackgroundTransparency=1 body.Text=utf8TruncateEnd(msg,60)
-            body.TextColor3=T.TEXT_DIM body.TextSize=12 body.Font=Enum.Font.Gotham
-            body.TextXAlignment=Enum.TextXAlignment.Left body.TextTruncate=Enum.TextTruncate.AtEnd
-            body.ZIndex=23 body.Parent=toast
-            H.typewrite(body, 0.02, 0.45)
-
-            -- thin draining progress line
-            local bar=Instance.new("Frame")
-            bar.Size=UDim2.new(1,0,0,2) bar.Position=UDim2.new(0,0,1,-2)
-            bar.BackgroundColor3=Color3.fromRGB(255,255,255) bar.BorderSizePixel=0 bar.ZIndex=25 bar.Parent=toast
-            do
-                local bg2=Instance.new("UIGradient")
-                bg2.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,colA),ColorSequenceKeypoint.new(1,colB)})
-                bg2.Parent=bar
-            end
-            task.delay(0.5, function()
-                if bar.Parent then H.tween(bar, TweenInfo.new(3.8, Enum.EasingStyle.Linear), {Size=UDim2.new(0,0,0,2)}) end
-            end)
-            return toast
         end)
+
+        -- left accent strip
+        local strip=Instance.new("Frame")
+        strip.Size=UDim2.new(0,4,1,-16) strip.Position=UDim2.new(0,5,0,8)
+        strip.BackgroundColor3=colA strip.BorderSizePixel=0 strip.ZIndex=62 strip.Parent=card
+        do local sc=Instance.new("UICorner") sc.CornerRadius=UDim.new(1,0) sc.Parent=strip end
+
+        -- avatar / system icon
+        local avFrame=Instance.new("Frame")
+        avFrame.Size=UDim2.new(0,40,0,40) avFrame.Position=UDim2.new(0,16,0.5,-20)
+        avFrame.BackgroundColor3=PAL.PANEL_SOFT avFrame.BorderSizePixel=0 avFrame.ZIndex=62 avFrame.Parent=card
+        do
+            local ac=Instance.new("UICorner") ac.CornerRadius=UDim.new(0,12) ac.Parent=avFrame
+            local as=Instance.new("UIStroke") as.Thickness=1.5 as.Color=colA as.Parent=avFrame
+        end
+        if isSystem then
+            local ic=Instance.new("TextLabel")
+            ic.Size=UDim2.new(1,0,1,0) ic.BackgroundTransparency=1 ic.Text="🔔" ic.TextSize=20 ic.ZIndex=63 ic.Parent=avFrame
+        else
+            local av=Instance.new("ImageLabel")
+            av.Size=UDim2.new(1,-4,1,-4) av.Position=UDim2.new(0,2,0,2)
+            av.BackgroundTransparency=1 av.Image=imageUrl or "" av.ZIndex=63 av.Parent=avFrame
+            do local avc=Instance.new("UICorner") avc.CornerRadius=UDim.new(0,10) avc.Parent=av end
+            H.loadAvatarInto(av, opts.userId, sender)
+        end
+
+        -- name (with role tag)
+        local nameLbl=Instance.new("TextLabel")
+        nameLbl.Size=UDim2.new(1,-150,0,16) nameLbl.Position=UDim2.new(0,64,0,8)
+        nameLbl.BackgroundTransparency=1
+        nameLbl.Text=isSystem and "SYSTEM" or (getRoleTag(role, opts.userId)..tostring(displayName))
+        nameLbl.TextColor3=(not isSystem and role~="none") and colA or PAL.TEXT
+        nameLbl.TextSize=12 nameLbl.Font=Enum.Font.GothamBlack
+        nameLbl.TextXAlignment=Enum.TextXAlignment.Left nameLbl.TextTruncate=Enum.TextTruncate.AtEnd
+        nameLbl.ZIndex=63 nameLbl.Parent=card
+
+        -- status pill (NOW / PRIVATE / REPLY)
+        local pill=Instance.new("TextLabel")
+        pill.Size=UDim2.new(0,74,0,15) pill.Position=UDim2.new(1,-82,0,8)
+        pill.BackgroundColor3=colA pill.BackgroundTransparency=0.8 pill.BorderSizePixel=0
+        pill.Text=isPrivate and "🔒 PRIVATE" or (opts.reply and "↩ REPLY" or "NOW")
+        pill.TextColor3=colA pill.TextSize=9 pill.Font=Enum.Font.GothamBlack pill.ZIndex=63 pill.Parent=card
+        do local pc=Instance.new("UICorner") pc.CornerRadius=UDim.new(1,0) pc.Parent=pill end
+
+        -- message body
+        local body=Instance.new("TextLabel")
+        body.Size=UDim2.new(1,-110,0,18) body.Position=UDim2.new(0,64,0,28)
+        body.BackgroundTransparency=1 body.Text=text
+        body.TextColor3=PAL.TEXT_DIM body.TextSize=12 body.Font=Enum.Font.Gotham
+        body.TextXAlignment=Enum.TextXAlignment.Left body.TextTruncate=Enum.TextTruncate.AtEnd
+        body.ZIndex=63 body.Parent=card
+
+        -- ×N counter (shown when the same sender keeps talking)
+        local badge=Instance.new("TextLabel")
+        badge.Size=UDim2.new(0,34,0,16) badge.Position=UDim2.new(1,-42,0,28)
+        badge.BackgroundColor3=colA badge.BorderSizePixel=0 badge.Visible=false
+        badge.Text="×1" badge.TextColor3=PAL.BG badge.TextSize=10 badge.Font=Enum.Font.GothamBlack
+        badge.ZIndex=64 badge.Parent=card
+        do local bc=Instance.new("UICorner") bc.CornerRadius=UDim.new(1,0) bc.Parent=badge end
+
+        -- draining timer line
+        local bar=Instance.new("Frame")
+        bar.Size=UDim2.new(1,0,0,2) bar.Position=UDim2.new(0,0,1,-2)
+        bar.BackgroundColor3=Color3.fromRGB(255,255,255) bar.BorderSizePixel=0 bar.ZIndex=64 bar.Parent=card
+        do
+            local bg=Instance.new("UIGradient")
+            bg.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,colA),ColorSequenceKeypoint.new(1,colB)})
+            bg.Parent=bar
+        end
+
+        local entry={key=key, wrap=wrap, card=card, body=body, badge=badge, bar=bar, scale=scale, count=1, token=0}
+        entry.arm=function()
+            entry.token=entry.token+1
+            local tk=entry.token
+            bar.Size=UDim2.new(1,0,0,2)
+            H.tween(bar, TweenInfo.new(MT.life, Enum.EasingStyle.Linear), {Size=UDim2.new(0,0,0,2)})
+            task.delay(MT.life, function() if entry.token==tk then H.dismissMsgToast(entry) end end)
+        end
+
+        -- tap: dismiss + open chat if closed
+        local hit=Instance.new("TextButton")
+        hit.Size=UDim2.new(1,0,1,0) hit.BackgroundTransparency=1 hit.Text="" hit.ZIndex=70 hit.Parent=card
+        hit.MouseButton1Click:Connect(function()
+            H.dismissMsgToast(entry)
+            if H.openChat then pcall(H.openChat) end
+        end)
+
+        table.insert(MT.live, entry)
+        H.tween(card, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position=UDim2.new(0,0,0,0)})
+        task.delay(0.4, function() if not entry.leaving then entry.arm() end end)
     end
 
     function H.showUnifiedJoin(name, displayName, userId)
@@ -2415,14 +2481,34 @@ local function buildUI()
                 end)
                 if measuredOk and measured then menuWidth=math.max(menuWidth, measured.X+18) end
             end
-            local screenWidth = math.max(130, sg.AbsoluteSize.X-8)
+            local screenWidth = math.max(130, frame.AbsoluteSize.X-8)
             menuWidth=math.min(menuWidth, screenWidth)
+            local menuH = math.min(contentH,140)
             local menu = Instance.new("ScrollingFrame")
-            menu.Size=UDim2.new(0,menuWidth,0,math.min(contentH,140))
+            menu.Size=UDim2.new(0,menuWidth,0,menuH)
+            -- keep the menu INSIDE the chat window: X within the window, Y within the message list
             local abs, absSize = holder.AbsolutePosition, holder.AbsoluteSize
-            local menuX = abs.X+absSize.X-menuWidth-4
-            menuX=math.max(4, math.min(menuX, sg.AbsoluteSize.X-menuWidth-4))
-            menu.Position = UDim2.fromOffset(menuX, math.max(0, abs.Y+2))
+            local fa, fsz = frame.AbsolutePosition, frame.AbsoluteSize
+            local sa, ssz = scroller.AbsolutePosition, scroller.AbsoluteSize
+            local minX, minY = fa.X+4, sa.Y+2
+            local maxX = math.max(minX, fa.X+fsz.X-menuWidth-4)
+            local maxY = math.max(minY, sa.Y+ssz.Y-menuH-2)
+            local menuX = math.max(minX, math.min(abs.X+absSize.X-menuWidth-4, maxX))
+            local menuY = math.max(minY, math.min(abs.Y+2, maxY))
+            menu.Position = UDim2.fromOffset(menuX, menuY)
+            -- close it if the window moves, hides or the list scrolls (it would be left floating)
+            do
+                local conns = {}
+                local function dropMenu() pcall(closeMenu) end
+                table.insert(conns, frame:GetPropertyChangedSignal("AbsolutePosition"):Connect(dropMenu))
+                table.insert(conns, frame:GetPropertyChangedSignal("Visible"):Connect(dropMenu))
+                table.insert(conns, scroller:GetPropertyChangedSignal("CanvasPosition"):Connect(dropMenu))
+                menu.AncestryChanged:Connect(function()
+                    if not menu.Parent then
+                        for _,c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+                    end
+                end)
+            end
             menu.BackgroundColor3=PAL.BG menu.BorderSizePixel=1
             menu.BorderColor3=PAL.BORDER
             menu.CanvasSize=UDim2.new(0,0,0,contentH)
@@ -2656,6 +2742,11 @@ local function buildUI()
 
     -- Toggle + close
     local visible=true
+    function H.openChat()
+        if visible then return end
+        visible=true frame.Visible=true H.popIn(frame, 0.88, 0.32)
+        unread=0 badge.Text="0" badge.Visible=false scrollToLatest()
+    end
     closeBtn.MouseButton1Click:Connect(function() visible=false stickerPanel.Visible=false H.popOut(frame) end)
     toggleBtn.MouseButton1Click:Connect(function()
         if toggleMoved() then toggleReset() return end
@@ -4628,14 +4719,14 @@ local function buildUI()
                                                     if s.hash==hash and s.id and s.id~="" then foundLocalId=s.id break end
                                                 end
                                                 addChatMessage(displayName, msg, false, msgRole, msgUserId, to, foundLocalId or "", replyData, hash, name)
-                                                H.showToast(name, getNick(msgUserId or 0, displayName), msg, H.avatarFallback(msgUserId), false)
+                                                H.showToast(name, getNick(msgUserId or 0, displayName), msg, H.avatarFallback(msgUserId), false, {userId=msgUserId, role=msgRole, private=(to and to~="") and true or false, sticker=true, reply=replyData~=nil})
                                             elseif stickerId and stickerId~="" then
                                                 addChatMessage(displayName, msg, false, msgRole, msgUserId, to, stickerId, replyData, nil, name)
-                                                H.showToast(name, getNick(msgUserId or 0, displayName), msg, H.avatarFallback(msgUserId), false)
+                                                H.showToast(name, getNick(msgUserId or 0, displayName), msg, H.avatarFallback(msgUserId), false, {userId=msgUserId, role=msgRole, private=(to and to~="") and true or false, sticker=true, reply=replyData~=nil})
                                             end
                                         else
                                             addChatMessage(displayName, msg, false, entry.role or "none", entry.userId, to, entry.sticker, replyData, entry.sticker_hash, name)
-                                            H.showToast(name, getNick(entry.userId or 0, displayName), msg, H.avatarFallback(entry.userId), false)
+                                            H.showToast(name, getNick(entry.userId or 0, displayName), msg, H.avatarFallback(entry.userId), false, {userId=entry.userId, role=entry.role, private=(to and to~="") and true or false, reply=replyData~=nil})
                                             local otherPlayer=Players:FindFirstChild(name)
                                             if otherPlayer and otherPlayer.Character then H.makeBubble(otherPlayer.Character, msg) end
                                         end
@@ -4916,7 +5007,7 @@ local function buildUI()
         task.wait(0.45)
         if alive then pcall(function() refreshOnlineList(false) end) end
     end)
-    print("[DEVIL] buildUI() finished — V3.0 ready")
+    print("[DEVIL] buildUI() finished — V3.1 ready")
 end
 
 -- ==================================================================
@@ -4945,7 +5036,7 @@ task.spawn(function()
             warn("[DEVIL] buildUI error:\n"..tostring(err))
             if loadFrame and loadFrame.Parent then loadStatus.Text="Error" end
         else
-            print("[DEVIL] 😈 DEVIL CHAT V3.0 READY 🔥")
+            print("[DEVIL] 😈 DEVIL CHAT V3.1 READY 🔥")
         end
     end
 end)
